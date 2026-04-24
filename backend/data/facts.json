@@ -1,0 +1,21 @@
+{
+  "full_name": "Damian Roach",
+  "name": "Damian",
+  "current_role": "AI Engineer",
+  "location": "Fort Wayne, IN",
+  "email": "damianroach@gmail.com",
+  "linkedin": "linkedin.com/in/damianroach",
+  "specialties": [
+    "AI",
+    "Machine Learning",
+    "Data Science"
+  ],
+  "years_experience": 10,
+  "education": [
+    {
+      "degree": "Your Degree",
+      "institution": "Udemy Course",
+      "year": "2020"
+    }
+  ]
+}
