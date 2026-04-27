@@ -1,22 +1,26 @@
-param(
-    [string]$Environment = "dev",   # dev | test | prod
-    [string]$ProjectName = "twin"
-)
-$ErrorActionPreference = "Stop"
+#!/usr/bin/env bash
+set -euo pipefail
 
-Write-Host "Deploying $ProjectName to $Environment ..." -ForegroundColor Green
+ENVIRONMENT="${1:-dev}"
+PROJECT_NAME="${PROJECT_NAME:-twin}"
+
+echo "Deploying ${PROJECT_NAME} to ${ENVIRONMENT} ..."
+
+# Move to project root
+cd "$(dirname "$0")/.."
 
 # 1. Build Lambda package
-Set-Location (Split-Path $PSScriptRoot -Parent)   # project root
-Write-Host "Building Lambda package..." -ForegroundColor Yellow
-Set-Location backend
+echo "Building Lambda package..."
+cd backend
 uv run deploy.py
-Set-Location ..
+cd ..
 
 # 2. Terraform workspace & apply
-Set-Location terraform
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=${DEFAULT_AWS_REGION:-us-east-1}
+cd terraform
+
+AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+AWS_REGION="${DEFAULT_AWS_REGION:-us-east-1}"
+
 terraform init -input=false \
   -backend-config="bucket=twin-terraform-state-${AWS_ACCOUNT_ID}" \
   -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
@@ -24,39 +28,54 @@ terraform init -input=false \
   -backend-config="dynamodb_table=twin-terraform-locks" \
   -backend-config="encrypt=true"
 
-if (-not (terraform workspace list | Select-String $Environment)) {
-    terraform workspace new $Environment
-} else {
-    terraform workspace select $Environment
-}
+if terraform workspace list | grep -qE "^[* ]+${ENVIRONMENT}$"; then
+  terraform workspace select "${ENVIRONMENT}"
+else
+  terraform workspace new "${ENVIRONMENT}"
+fi
 
-if ($Environment -eq "prod") {
-    terraform apply -var-file="prod.tfvars" -var="project_name=$ProjectName" -var="environment=$Environment" -auto-approve
-} else {
-    terraform apply -var="project_name=$ProjectName" -var="environment=$Environment" -auto-approve
-}
+if [ "${ENVIRONMENT}" = "prod" ]; then
+  terraform apply \
+    -var-file="prod.tfvars" \
+    -var="project_name=${PROJECT_NAME}" \
+    -var="environment=${ENVIRONMENT}" \
+    -auto-approve
+else
+  terraform apply \
+    -var="project_name=${PROJECT_NAME}" \
+    -var="environment=${ENVIRONMENT}" \
+    -auto-approve
+fi
 
-$ApiUrl        = terraform output -raw api_gateway_url
-$FrontendBucket = terraform output -raw s3_frontend_bucket
-try { $CustomUrl = terraform output -raw custom_domain_url } catch { $CustomUrl = "" }
+API_URL="$(terraform output -raw api_gateway_url)"
+FRONTEND_BUCKET="$(terraform output -raw s3_frontend_bucket)"
+
+CUSTOM_URL=""
+if terraform output -raw custom_domain_url >/tmp/custom_domain_url.txt 2>/dev/null; then
+  CUSTOM_URL="$(cat /tmp/custom_domain_url.txt)"
+fi
 
 # 3. Build + deploy frontend
-Set-Location ..\frontend
+cd ../frontend
 
-# Create production environment file with API URL
-Write-Host "Setting API URL for production..." -ForegroundColor Yellow
-"NEXT_PUBLIC_API_URL=$ApiUrl" | Out-File .env.production -Encoding utf8
+echo "Setting API URL for production..."
+echo "NEXT_PUBLIC_API_URL=${API_URL}" > .env.production
 
 npm install
 npm run build
-aws s3 sync .\out "s3://$FrontendBucket/" --delete
-Set-Location ..
+
+aws s3 sync ./out "s3://${FRONTEND_BUCKET}/" --delete
+
+cd ..
 
 # 4. Final summary
-$CfUrl = terraform -chdir=terraform output -raw cloudfront_url
-Write-Host "Deployment complete!" -ForegroundColor Green
-Write-Host "CloudFront URL : $CfUrl" -ForegroundColor Cyan
-if ($CustomUrl) {
-    Write-Host "Custom domain  : $CustomUrl" -ForegroundColor Cyan
-}
-Write-Host "API Gateway    : $ApiUrl" -ForegroundColor Cyan
+CF_URL="$(terraform -chdir=terraform output -raw cloudfront_url)"
+
+echo "Deployment complete!"
+echo "CloudFront URL : ${CF_URL}"
+
+if [ -n "${CUSTOM_URL}" ]; then
+  echo "Custom domain  : ${CUSTOM_URL}"
+fi
+
+echo "API Gateway    : ${API_URL}"
