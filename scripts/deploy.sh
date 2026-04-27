@@ -6,16 +6,13 @@ PROJECT_NAME="${PROJECT_NAME:-twin}"
 
 echo "Deploying ${PROJECT_NAME} to ${ENVIRONMENT} ..."
 
-# Move to project root
 cd "$(dirname "$0")/.."
 
-# 1. Build Lambda package
 echo "Building Lambda package..."
 cd backend
 uv run deploy.py
 cd ..
 
-# 2. Terraform workspace & apply
 cd terraform
 
 AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
@@ -55,7 +52,6 @@ if terraform output -raw custom_domain_url >/tmp/custom_domain_url.txt 2>/dev/nu
   CUSTOM_URL="$(cat /tmp/custom_domain_url.txt)"
 fi
 
-# 3. Build + deploy frontend
 cd ../frontend
 
 echo "Setting API URL for production..."
@@ -68,7 +64,6 @@ aws s3 sync ./out "s3://${FRONTEND_BUCKET}/" --delete
 
 cd ..
 
-# 4. Final summary
 CF_URL="$(terraform -chdir=terraform output -raw cloudfront_url)"
 
 echo "Deployment complete!"
